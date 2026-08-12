@@ -1,6 +1,6 @@
 data:
   input_csv: "data/raw/chat.csv"
-  output_dir: "outputs"
+  output_dir: "data/outputs"
   processed_dir: "data/processed"
   model_dir: "model"
 

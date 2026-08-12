@@ -65,7 +65,7 @@ class QwenStickerAnalyzer:
     一个 Analyzer 对象只加载一次模型，
     后续可以连续分析多张表情包。
     """
-     def __init__(self,model_name: str,model_dir: str,max_new_tokens: int = 512) -> None:
+    def __init__(self,model_name: str,model_dir: str,max_new_tokens: int = 512) -> None:
         self.model_name = model_name
         self.max_new_tokens = max_new_tokens
 
@@ -87,7 +87,7 @@ class QwenStickerAnalyzer:
 
         print("视觉模型加载完成")
 
-     def analyze(self,image_path: str | Path) -> dict[str,Any]:
+    def analyze(self,image_path: str | Path) -> dict[str,Any]:
         """
         分析一张表情包。
 
@@ -147,7 +147,7 @@ class QwenStickerAnalyzer:
         return _parse_model_output(output_text)
 
      #2、解析Qwen输出
-     def _parse_model_output(output_text: str) -> dict[str,Any]:
+    def _parse_model_output(output_text: str) -> dict[str,Any]:
         """
         将视觉模型返回文本解析成字典。
         """
@@ -175,7 +175,7 @@ class QwenStickerAnalyzer:
         return _normalize_analysis(data)
 
      #标准化视觉模型输出
-     def _normalize_analysis(data: dict[str,Any]) -> dict[str,Any]:
+    def _normalize_analysis(data: dict[str,Any]) -> dict[str,Any]:
         visual_description = str(data.get("visual_description","")).strip()
         tone = str(data.get("tone","")).strip()
         caption = str(data.get("caption","")).strip()
