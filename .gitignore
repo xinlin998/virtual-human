@@ -1,0 +1,56 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# uv 虚拟环境
+.venv/
+
+# 测试和静态检查缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 环境变量和密钥
+.env
+.env.*
+!.env.example
+
+# 日志
+*.log
+logs/
+
+# 原始私人数据
+data/raw/
+data/interim/
+
+# 本地处理产物
+outputs/
+artifacts/
+cache/
+
+# 训练产物
+checkpoints/
+models/
+mlruns/
+wandb/
+
+# 大模型权重
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# 临时文件
+*.tmp
+*.temp
