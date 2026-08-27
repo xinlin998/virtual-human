@@ -12,6 +12,7 @@ def main():
     INPUT_CSV = CONFIGS["data"]['input_csv']
     ALLOWED_TYPES = CONFIGS['filter']['allowed_types']
     PROCESSED_DIR = CONFIGS['data']['processed_dir']
+    STICKERED_DIR = CONFIGS['data']['stickered_dir']
     MODEL_NAME = CONFIGS['sticker']['model_name']
     MODEL_DIR = CONFIGS['data']['model_dir']
     OUTPUT_DIR = CONFIGS['data']['output_dir']
@@ -23,8 +24,7 @@ def main():
     df.to_csv(PROCESSED_DIR)
     df = pd.read_csv(PROCESSED_DIR)
     analyzer = QwenStickerAnalyzer(model_name="Qwen/Qwen2.5-VL-3B-Instruct",model_dir=MODEL_DIR)
-    df, sticker_metadata = (
-    process_stickers(
+    df, sticker_metadata = process_stickers(
         df=df,
         analyzer=analyzer,
         message_type_col=(
@@ -35,6 +35,7 @@ def main():
         ),
         phash_threshold=5,
     )
+    df.to_csv(STICKERED_DIR)
     save_sticker_metadata(sticker_metadata,OUTPUT_DIR)
 
 

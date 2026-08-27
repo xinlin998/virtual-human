@@ -59,7 +59,7 @@ STICKER_PROMPT = """
 
 #1、Qwen2.5-VL 表情包分析器
 class QwenStickerAnalyzer:
-     """
+    """
     使用 Qwen2.5-VL 分析聊天表情包。
 
     一个 Analyzer 对象只加载一次模型，
@@ -146,6 +146,111 @@ class QwenStickerAnalyzer:
 
         return _parse_model_output(output_text)
 
+    def analyze_batch(self,image_paths: list[str | Path]) -> list[dict[str,Any]]:
+        """
+        批量分析多张表情包。
+        一张图片对应一个独立 conversation，
+        最终返回一个和 image_paths 等长的结果列表。
+        """
+        if not image_paths:
+            return []
+        batch_messages = []
+        for image_path in image_paths:
+            path = Path(image_path).resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"表情包不存在：{path}")
+            messages = [
+                {
+                    "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "image": path.as_uri(),
+                    },
+                    {
+                        "type": "text",
+                        "text": STICKER_PROMPT,
+                    },
+                ],
+                }
+            ]
+            batch_messages.append(messages)
+        texts = [
+            self.processor.apply_chat_template(messages,
+                                               tokenize=False,
+                                               add_generation_prompt=True)
+                                               for messages in batch_messages
+        ]    
+        image_inputs,video_inputs = process_vision_info(batch_messages)
+        inputs = self.processor(
+        text=texts,
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+    )
+
+        inputs = inputs.to(
+            self.model.device
+        )
+
+        # --------------------------------
+        # 5. GPU 一次生成整个 batch
+        # --------------------------------
+
+        with torch.inference_mode():
+
+            generated_ids = (
+                self.model.generate(
+                    **inputs,
+                    max_new_tokens=(
+                        self.max_new_tokens
+                    ),
+                    do_sample=False,
+                )
+            )
+
+        # --------------------------------
+        # 6. 去掉输入 prompt 的 token
+        # --------------------------------
+
+        generated_ids_trimmed = [
+            output_ids[
+                len(input_ids):
+            ]
+            for input_ids, output_ids
+            in zip(
+                inputs.input_ids,
+                generated_ids,
+            )
+        ]
+
+        # --------------------------------
+        # 7. 一次 decode 整个 batch
+        # --------------------------------
+
+        output_texts = (
+            self.processor.batch_decode(
+                generated_ids_trimmed,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )
+        )
+
+        # --------------------------------
+        # 8. 每个输出分别解析 JSON
+        # --------------------------------
+
+        results = [
+            _parse_model_output(
+                output_text
+            )
+            for output_text
+            in output_texts
+        ]
+
+        return results
+
      #2、解析Qwen输出
     def _parse_model_output(output_text: str) -> dict[str,Any]:
         """
@@ -223,13 +328,13 @@ def phash_distance(hash_a: str,hash_b: str) -> int:
 
 #查找重复表情包
 def _find_duplicate_sticker(current_phash: str,
-                            known_stickers: list[dict[str,Any]],
+                            unique_stickers: list[dict[str,Any]],
                             threshold: int) -> Optional[dict[str,Any]]:
 
     best_match = None
     best_distance = None
 
-    for sticker in known_stickers:
+    for sticker in unique_stickers:
         distance = phash_distance(current_phash,sticker['phash'])
 
         if distance > threshold:
@@ -304,6 +409,261 @@ def _build_sticker_metadata(
         "resolved":resolved,
         "usage_count":1
     }
+#切分列表
+def _iter_batches(
+    items: list,
+    batch_size: int,
+):
+    """
+    将列表按 batch_size 切成小批次。
+    """
+
+    for start in range(
+        0,
+        len(items),
+        batch_size,
+    ):
+        yield items[
+            start:
+            start + batch_size
+        ]
+
+def build_sticker_index(
+    df: DataFrame,
+    message_type_col: str = "message_type",
+    sticker_path_col: str = "sticker_path",
+    phash_threshold: int = 5,
+    project_root: str | Path | None = None,
+) -> tuple[
+    DataFrame,
+    list[dict[str, Any]],
+]:
+    """
+    第一阶段：建立表情包索引。
+
+    完成：
+    1. 筛选 sticker 消息；
+    2. 检查表情包路径；
+    3. 计算 pHash；
+    4. 根据 pHash 去重；
+    5. 为唯一表情包分配 sticker_id；
+    6. 将 sticker_id 回填到每一条表情包消息；
+    7. 统计每个表情包出现次数。
+
+    Returns
+    -------
+    result:
+        原聊天 DataFrame 的副本，
+        新增 sticker_id 列。
+
+    unique_stickers:
+        去重后的唯一表情包列表。
+    """
+
+    # --------------------------------------------------
+    # 1. 检查必要字段
+    # --------------------------------------------------
+
+    required_columns = {
+        message_type_col,
+        sticker_path_col,
+    }
+
+    missing_columns = (
+        required_columns
+        - set(df.columns)
+    )
+
+    if missing_columns:
+        raise ValueError(
+            "缺少必要列："
+            f"{sorted(missing_columns)}"
+        )
+
+    # --------------------------------------------------
+    # 2. 不直接修改原始 df
+    # --------------------------------------------------
+
+    result = df.copy()
+
+    # --------------------------------------------------
+    # 3. 创建 sticker_id 列
+    # --------------------------------------------------
+
+    if "sticker_id" not in result.columns:
+        result["sticker_id"] = None
+
+    # --------------------------------------------------
+    # 4. 确定项目根目录
+    # --------------------------------------------------
+
+    if project_root is None:
+        root = Path.cwd()
+    else:
+        root = Path(project_root).resolve()
+
+    # --------------------------------------------------
+    # 5. 只筛选表情包消息
+    # --------------------------------------------------
+
+    sticker_rows = result[
+        result[message_type_col]
+        == "sticker"
+    ]
+
+    print(
+        f"表情包消息总数：{len(sticker_rows)}"
+    )
+
+    # --------------------------------------------------
+    # 6. 保存唯一表情包
+    # --------------------------------------------------
+
+    unique_stickers: list[
+        dict[str, Any]
+    ] = []
+
+    sticker_counter = 1
+
+    # --------------------------------------------------
+    # 7. 遍历所有表情包消息
+    # --------------------------------------------------
+
+    for index, row in sticker_rows.iterrows():
+
+        raw_path = row[
+            sticker_path_col
+        ]
+
+        # 路径为空
+        if pd.isna(raw_path):
+            print(
+                f"[WARNING] index={index} "
+                "表情包路径为空"
+            )
+            continue
+
+        relative_path = str(
+            raw_path
+        ).strip()
+
+        if not relative_path:
+            print(
+                f"[WARNING] index={index} "
+                "表情包路径为空字符串"
+            )
+            continue
+
+        # --------------------------------------------------
+        # 8. 构造真正用于访问图片的绝对路径
+        # --------------------------------------------------
+
+        path = Path(relative_path)
+
+        if not path.is_absolute():
+            absolute_path = (
+                root / path
+            ).resolve()
+        else:
+            absolute_path = (
+                path.resolve()
+            )
+
+        if not absolute_path.exists():
+            print(
+                f"[WARNING] 文件不存在："
+                f"{absolute_path}"
+            )
+            continue
+
+        # --------------------------------------------------
+        # 9. 计算当前图片 pHash
+        # --------------------------------------------------
+
+        current_phash = compute_phash(
+            absolute_path
+        )
+
+        # --------------------------------------------------
+        # 10. 查找是否已经存在相同/相似表情包
+        # --------------------------------------------------
+
+        duplicate = (
+            _find_duplicate_sticker(
+                current_phash=(
+                    current_phash
+                ),
+                unique_stickers=(
+                    unique_stickers
+                ),
+                threshold=(
+                    phash_threshold
+                ),
+            )
+        )
+
+        # --------------------------------------------------
+        # 11. 如果是重复表情包
+        # --------------------------------------------------
+
+        if duplicate is not None:
+
+            duplicate[
+                "usage_count"
+            ] += 1
+
+            result.at[
+                index,
+                "sticker_id",
+            ] = duplicate[
+                "sticker_id"
+            ]
+
+            continue
+
+        # --------------------------------------------------
+        # 12. 如果是全新的表情包
+        # --------------------------------------------------
+
+        sticker_id = (
+            f"sticker_"
+            f"{sticker_counter:06d}"
+        )
+
+        sticker = {
+            "sticker_id": sticker_id,
+
+            # 保存原始/相对路径，
+            # 不保存机器绑定的绝对路径
+            "file_path": relative_path,
+
+            "phash": current_phash,
+
+            "usage_count": 1,
+        }
+
+        unique_stickers.append(
+            sticker
+        )
+
+        # 当前聊天消息和 sticker_id 建立映射
+        result.at[
+            index,
+            "sticker_id",
+        ] = sticker_id
+
+        sticker_counter += 1
+
+    # --------------------------------------------------
+    # 13. 输出统计信息
+    # --------------------------------------------------
+
+    print(
+        "表情包去重后数量："
+        f"{len(unique_stickers)}"
+    )
+
+    return result,unique_stickers,
 
 #批量处理所有表情包
 def process_stickers(
@@ -311,102 +671,102 @@ def process_stickers(
         analyzer: QwenStickerAnalyzer,
         message_type_col: str = "message_type",
         sticker_path_col: str = "sticker_path",
-        phash_threshold: int = 5
+        phash_threshold: int = 5,
+        batch_size: int = 4,
+        project_root: str | Path | None = None
 ) -> tuple[DataFrame,list[dict[str,Any]]]:
 
-    required_columns = {message_type_col,sticker_path_col}
-
-    missing_columns = required_columns - set(df.columns)
-
-    if missing_columns:
-        raise ValueError(f"缺少必要列：\n{sorted(missing_columns)}")
-
-    result = df.copy()
-
-    if "sticker_id" not in result.columns:
-        result["sticker_id"] = None
+    #第一阶段：pHash去重并建立sticker_id映射
+    result,known_stickers = build_sticker_index(
+        df=df,
+        message_type_col=message_type_col,
+        sticker_path_col=sticker_path_col,
+        phash_threshold=phash_threshold,
+        project_root=project_root
+    )
 
     if "sticker_caption" not in result.columns:
         result["sticker_caption"] = None
 
-    known_stickers: list[dict[str,Any]] = []
+    total = len(known_stickers)
 
-    sticker_counter = 1
+    if total == 0:
+        print("没有需要分析的表情包")
+        return result,known_stickers
 
-    sticker_rows = result[result[message_type_col] == "sticker"]
+    print(f"开始批量分析表情包，共{total}个唯一表情包，batch_size={batch_size}")
 
-    total = len(sticker_rows)
-    print(f"待处理表情包消息：{total}")
+    if project_root is None:
+        root = Path.cwd()
+    else:
+        root = Path(project_root).resolve()
 
-    for number , (index,row) in enumerate(sticker_rows.iterrows(),start=1):
-        raw_path = row[sticker_path_col]
+    #第二阶段：按照batch_size批量调用Qwen2.5-VL
+    for batch_number,batch_stickers in enumerate(_iter_batches(known_stickers,batch_size),start=1):
 
-        if pd.isna(raw_path):
-            continue
+        batch_paths = []
 
-        image_path = str(raw_path).strip()
+        for sticker in batch_stickers:
+            path = Path(sticker["file_path"])
 
-        if not image_path:
-            continue
+            if not path.is_absolute():
+                path = (root/path).resolve()
+            else:
+                path = path.resolve()
 
-        path = Path(image_path)
+            batch_paths.append(path)
 
-        path = path.parent.parent/"stickers"/path.name
-
-        if not path.exists():
-            print(f"[WARNIGNG]文件不存在：{path}")
-            continue
-
-        current_phash = compute_phash(path)
-
-        duplicate = _find_duplicate_sticker(current_phash=current_phash,known_stickers=known_stickers,threshold=phash_threshold)
-
-        if duplicate is not None:
-            duplicate["usage_count"] += 1
-
-            result.at[index,"sticker_id"] = duplicate['sticker_id']
-
-            result.at[index,'sticker_caption'] = duplicate['caption']
-
-            continue
-
-        sticker_id = f"sticker_{sticker_counter:06d}"
-
-        print(f"[{number}/{total}]分析新表情包：{sticker_id}")
+        print(f"正在处理第{batch_number}批，本批{len(batch_paths)}个表情包")
 
         try:
-            metadata = _build_sticker_metadata(
-                sticker_id=sticker_id,
-                image_path=path,
-                phash=current_phash,
-                analyzer=analyzer
-            )
+            batch_analyses = analyzer.analyze_batch(batch_paths)
+
+            if len(batch_analyses) != len(batch_stickers):
+                raise ValueError(
+                    f"批量推理结果数量不一致：输入{len(batch_stickers)}张图片，返回{len(batch_analyses)}个结果"
+                )
+
         except Exception as exc:
-            print(f"[WARNING]{sticker_id}分析失败：{exc}")
+            print(f"[WARNING]第{batch_number}批分析失败：{exc}")
 
-            metadata = {
-                "sticker_id":sticker_id,
-                'file_path':image_path,
-                'phash':current_phash,
-                'visual_description':"",
-                'emotion':[],
-                'intent':[],
-                'tone':"",
-                'caption':'[表情包：待处理]',
-                'resolved':False,
-                'usage_count':1
-            }
+            batch_analyses = [
+                {
+                    "visual_description":"",
+                    "emotion":[],
+                    "intent":[],
+                    "tone":"",
+                    "caption":""
+                }
+                for _ in batch_stickers
+            ]
 
-        known_stickers.append(metadata)
+        #将每张图片的分析结果写回对应metadata
+        for sticker,analysis in zip(batch_stickers,batch_analyses):
 
-        result.at[index,'sticker_id'] = sticker_id
-        result.at[index,'sticker_caption'] = metadata['caption']
+            caption = _build_sticker_caption(analysis)
 
-        sticker_counter += 1
+            sticker["visual_description"] = analysis.get("visual_description","")
+            sticker["emotion"] = analysis.get("emotion",[])
+            sticker["intent"] = analysis.get("intent",[])
+            sticker["tone"] = analysis.get("tone","")
+            sticker["caption"] = caption
+            sticker["resolved"] = caption not in {"[表情包:待处理]","[表情包：待处理]"}
 
-    print(f"表情包去重后数量：{len(known_stickers)}")
+    #第三阶段：根据sticker_id将caption回填到每一条聊天消息
+    sticker_caption_map = {
+        sticker["sticker_id"]:sticker["caption"]
+        for sticker in known_stickers
+    }
 
-    return result , known_stickers
+    sticker_mask = result["sticker_id"].notna()
+
+    result.loc[sticker_mask,"sticker_caption"] = (
+        result.loc[sticker_mask,"sticker_id"].map(sticker_caption_map)
+    )
+
+    print(f"表情包批量分析完成，共处理{len(known_stickers)}个唯一表情包")
+
+    return result,known_stickers
 
 def save_sticker_metadata(metadata:list[dict[str,Any]],
                           output_path: str | Path) -> None:
