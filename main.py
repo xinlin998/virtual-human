@@ -44,10 +44,11 @@ def main() -> None:
     df, sticker_metadata = process_stickers(
         df=df,
         analyzer=analyzer,
-        phash_threshold=sticker_config["phash_threshold"],
-        batch_size=sticker_config["batch_size"],
-        project_root=PROJECT_ROOT,
-        image_dir=sticker_image_dir
+        message_type_col="message_type",
+        sticker_path_col="sticker_path",
+        phash_threshold=config["sticker"]["phash_threshold"],
+        batch_size=config["sticker"]["batch_size"],
+        image_root=config["data"]["sticker_image_dir"],
     )
     df = normalize_message(df)
     ensure_parent_dir(stickered_csv)

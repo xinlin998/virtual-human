@@ -32,15 +32,18 @@ STICKER_PROMPT = """
 
 请综合分析图片本身的视觉内容和图片中的文字。
 
-要求：
+caption要求：
 
-1. 描述图片中的主要人物、动物或物体；
-2. 描述它们的动作、表情和状态；
-3. 如果图片中存在文字，请结合文字理解表情包含义；
-4. 判断表情包表达的主要情绪；
-5. 判断它在私人聊天中的常见使用意图；
-6. 判断整体语气；
-7. 生成一条简短自然的表情包描述，用于聊天模型训练。
+1. 使用客观、简短的中文描述；
+2. 长度建议15～40个汉字；
+3. 描述“画面主体 + 核心情绪/聊天含义”；
+4. 不要使用“这张图片”“这个表情包”等开头；
+5. 不要使用“可能”“似乎”等无必要猜测；
+6. 不要使用疑问句；
+7. 不要使用emoji；
+8. 不要使用感叹式评价，例如“真可爱”“太棒了”；
+9. 不要输出“简洁自然”“情绪1”“意图1”等占位内容；
+10. caption中不要添加“[表情包:]”前缀。
 
 注意：
 
@@ -88,7 +91,9 @@ class QwenStickerAnalyzer:
             model_name,
             cache_dir=self.model_dir
         )
-
+        self.processor.tokenizer.padding_side = "left"
+        if self.processor.tokenizer.pad_token_id is None:
+            self.processor.tokenizer.pad_token = self.processor.tokenizer.eos_token
         self.model.eval()
 
         print("视觉模型加载完成")
@@ -172,10 +177,25 @@ class QwenStickerAnalyzer:
             clean_up_tokenization_spaces=False
         )
 
-        return [
-            _parse_model_output(output_text)
-            for output_text in output_texts
-        ]
+        results = []
+
+        for index,output_text in enumerate(output_texts):
+            try:
+                result = _parse_model_output(output_text)
+            except Exception as exc:
+                print(f"[WARNING] batch中第{index + 1}个表情包解析失败：{exc}")
+
+                result = {
+                    "visual_description":"",
+                    "emotion":[],
+                    "intent":[],
+                    "tone":"",
+                    "caption":""
+                }
+
+            results.append(result)
+
+        return results
 
 
 # 解析Qwen输出
@@ -240,20 +260,29 @@ def _normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
 
 
 # 解析表情包真实路径
+#解析表情包真实路径
 def _resolve_sticker_path(
         raw_path: str | Path,
         image_root: str | Path = "data/stickers"
-) -> Path:
-    """
-    将聊天CSV中的表情包路径映射到项目实际存储目录。
-    """
-    normalized_path = str(raw_path).strip().replace("\\", "/")
+) -> Path | None:
+
+    path_text = str(raw_path).strip()
+
+    if not path_text:
+        return None
+
+    #远程URL不属于本地表情包文件
+    if path_text.startswith(("http://","https://")):
+        return None
+
+    normalized_path = path_text.replace("\\","/")
+
     file_name = Path(normalized_path).name
 
     if not file_name:
-        raise ValueError(f"无法从路径中提取表情包文件名：{raw_path}")
+        return None
 
-    return (Path(image_root) / file_name).resolve()
+    return (Path(image_root)/file_name).resolve()
 
 
 # 计算pHash
@@ -359,12 +388,8 @@ def build_sticker_index(
         sticker_path_col: str = "sticker_path",
         phash_threshold: int = 5,
         image_root: str | Path = "data/stickers"
-) -> tuple[DataFrame, list[dict[str, Any]]]:
-    required_columns = {
-        message_type_col,
-        sticker_path_col
-    }
-
+) -> tuple[DataFrame,list[dict[str,Any]]]:
+    required_columns = {message_type_col,sticker_path_col}
     missing_columns = required_columns - set(df.columns)
 
     if missing_columns:
@@ -375,46 +400,61 @@ def build_sticker_index(
     if "sticker_id" not in result.columns:
         result["sticker_id"] = None
 
-    sticker_rows = result[
-        result[message_type_col] == "sticker"
-    ]
+    sticker_rows = result[result[message_type_col] == "sticker"]
 
     print(f"表情包消息总数：{len(sticker_rows)}")
 
-    unique_stickers: list[dict[str, Any]] = []
+    unique_stickers: list[dict[str,Any]] = []
     sticker_counter = 1
+    valid_count = 0
+    missing_path_count = 0
+    remote_url_count = 0
+    missing_file_count = 0
+    phash_failed_count = 0
 
-    for index, row in sticker_rows.iterrows():
+    for index,row in sticker_rows.iterrows():
         raw_path = row[sticker_path_col]
 
         if pd.isna(raw_path):
+            missing_path_count += 1
             print(f"[WARNING] index={index} 表情包路径为空")
             continue
 
         image_path = str(raw_path).strip()
 
         if not image_path:
+            missing_path_count += 1
             print(f"[WARNING] index={index} 表情包路径为空字符串")
             continue
 
-        try:
-            absolute_path = _resolve_sticker_path(
-                raw_path=image_path,
-                image_root=image_root
-            )
-        except ValueError as exc:
-            print(f"[WARNING] index={index} 路径解析失败：{exc}")
+        if image_path.startswith(("http://","https://")):
+            remote_url_count += 1
+            print(f"[WARNING] index={index} 远程表情包URL无法映射到本地文件：{image_path}")
+            continue
+
+        absolute_path = _resolve_sticker_path(
+            raw_path=image_path,
+            image_root=image_root
+        )
+
+        if absolute_path is None:
+            missing_path_count += 1
+            print(f"[WARNING] index={index} 无法解析表情包路径：{image_path}")
             continue
 
         if not absolute_path.exists():
+            missing_file_count += 1
             print(f"[WARNING] 文件不存在：{absolute_path}")
             continue
 
         try:
             current_phash = compute_phash(absolute_path)
         except Exception as exc:
+            phash_failed_count += 1
             print(f"[WARNING] pHash计算失败：{absolute_path}，原因：{exc}")
             continue
+
+        valid_count += 1
 
         duplicate = _find_duplicate_sticker(
             current_phash=current_phash,
@@ -424,7 +464,7 @@ def build_sticker_index(
 
         if duplicate is not None:
             duplicate["usage_count"] += 1
-            result.at[index, "sticker_id"] = duplicate["sticker_id"]
+            result.at[index,"sticker_id"] = duplicate["sticker_id"]
             continue
 
         sticker_id = f"sticker_{sticker_counter:06d}"
@@ -435,21 +475,24 @@ def build_sticker_index(
         ).as_posix()
 
         sticker = {
-            "sticker_id": sticker_id,
-            "file_path": stored_path,
-            "phash": current_phash,
-            "usage_count": 1
+            "sticker_id":sticker_id,
+            "file_path":stored_path,
+            "phash":current_phash,
+            "usage_count":1
         }
 
         unique_stickers.append(sticker)
-
-        result.at[index, "sticker_id"] = sticker_id
-
+        result.at[index,"sticker_id"] = sticker_id
         sticker_counter += 1
 
+    print(f"有效本地表情包消息：{valid_count}")
+    print(f"空路径表情包消息：{missing_path_count}")
+    print(f"远程URL表情包消息：{remote_url_count}")
+    print(f"本地文件不存在：{missing_file_count}")
+    print(f"pHash计算失败：{phash_failed_count}")
     print(f"表情包去重后数量：{len(unique_stickers)}")
 
-    return result, unique_stickers
+    return result,unique_stickers
 
 
 # 第二阶段：Qwen批量分析并回填caption
