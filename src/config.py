@@ -1,25 +1,38 @@
 from pathlib import Path
+from typing import Any
+
 import yaml
-"""
-编写配置函数，便于后续程序使用配置
-"""
-#加载config
-def load_config(path:str) ->  dict:
+
+REQUIRED_CONFIG_KEYS = {
+    "data": {
+        "input_csv",
+        "processed_csv",
+        "stickered_csv",
+        "sticker_metadata_jsonl",
+        "sticker_image_dir",
+        "model_cache_dir",
+    },
+    "preprocess": {"allowed_message_types"},
+    "sticker": {"model_name", "batch_size", "phash_threshold", "max_new_tokens"},
+}
+
+
+def load_config(path: str | Path) -> dict[str, Any]:
     config_path = Path(path)
-    
-    #假如文件不存在
     if not config_path.exists():
-        raise FileNotFoundError(f"Config not found:{config_path}")
-    
-    #读取配置参数
-    with config_path.open('r',encoding='utf-8') as file:
+        raise FileNotFoundError(f"配置文件不存在：{config_path}")
+    with config_path.open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
-    
+    if not isinstance(config, dict):
+        raise ValueError("配置文件顶层必须是 YAML 对象")
+    validate_config(config)
     return config
 
-#正常时不返回数据；出错时抛出异常。
-def validate_config(path:str) -> None:
-    """
-    后续编写需要抛出异常的模块
-    """
-    pass
+
+def validate_config(config: dict[str, Any]) -> None:
+    for section, required_keys in REQUIRED_CONFIG_KEYS.items():
+        if section not in config or not isinstance(config[section], dict):
+            raise ValueError(f"配置文件缺少有效 section：{section}")
+        missing_keys = required_keys - set(config[section])
+        if missing_keys:
+            raise ValueError(f"配置项 {section} 缺少：{sorted(missing_keys)}")

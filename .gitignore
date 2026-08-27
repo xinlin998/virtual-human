@@ -1,56 +1,53 @@
-# Python 缓存
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 
-# uv 虚拟环境
+# uv
 .venv/
 
-# 测试和静态检查缓存
+# Tool caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
-
-# 操作系统文件
 .DS_Store
 Thumbs.db
 
-# 环境变量和密钥
+# Secrets
 .env
 .env.*
 !.env.example
 
-# 日志
+# Logs
 *.log
 logs/
 
-# 原始私人数据
+# Private chat data and generated outputs
 data/raw/
 data/interim/
+data/processed/
+data/stickers/
+data/outputs/
 
-# 本地处理产物
+# Model and training artifacts
+models/
+checkpoints/
 outputs/
 artifacts/
 cache/
-
-# 训练产物
-checkpoints/
-models/
 mlruns/
 wandb/
-
-# 大模型权重
 *.pt
 *.pth
 *.ckpt
 *.safetensors
 
-# 临时文件
+# Temporary files
 *.tmp
 *.temp
