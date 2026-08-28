@@ -2,6 +2,11 @@ data:
   input_csv: "data/raw/chat.csv"
   processed_csv: "data/processed/processed_chat.csv"
   stickered_csv: "data/processed/stickered_chat.csv"
+
+  anonymized_messages_csv: "data/processed/anonymized_messages.csv"
+  privacy_report_json: "data/outputs/privacy_report.json"
+  turns_jsonl: "data/outputs/turns.jsonl"
+
   sticker_metadata_jsonl: "data/outputs/sticker_metadata.jsonl"
   sticker_review_jsonl: "data/outputs/sticker_review_queue.jsonl"
   sticker_image_dir: "data/stickers"
@@ -21,3 +26,15 @@ sticker:
   max_new_tokens: 256
   retry_failed: true
   min_quality_score: 0.85
+
+privacy:
+  enabled: True
+  aliases_file: "data/private/privacy_aliases.yaml"
+
+turn:
+  merge_gap_seconds: 120
+  max_turn_duration_seconds: 300
+  max_messages_per_turn: 10
+  message_break_token: "<msg_break>"
+  self_speaker: "assistant"
+  other_speaker: "user"

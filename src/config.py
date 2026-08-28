@@ -4,14 +4,40 @@ from typing import Any
 import yaml
 
 REQUIRED_CONFIG_KEYS = {
-    "data": {
-        "input_csv","processed_csv","stickered_csv","sticker_metadata_jsonl",
-        "sticker_review_jsonl","sticker_image_dir","model_cache_dir"
+    "data":{
+        "input_csv",
+        "processed_csv",
+        "stickered_csv",
+        "anonymized_messages_csv",
+        "privacy_report_json",
+        "turns_jsonl",
+        "sticker_metadata_jsonl",
+        "sticker_review_jsonl",
+        "sticker_image_dir",
+        "model_cache_dir"
     },
-    "preprocess": {"allowed_message_types"},
-    "sticker": {
-        "model_name","batch_size","gif_batch_size","gif_max_frames","phash_threshold",
-        "max_new_tokens","retry_failed","min_quality_score"
+    "preprocess":{
+        "allowed_message_types"
+    },
+    "sticker":{
+        "model_name",
+        "batch_size",
+        "gif_batch_size",
+        "gif_max_frames",
+        "phash_threshold",
+        "max_new_tokens",
+        "retry_failed",
+        "min_quality_score"
+    },
+    "privacy":{
+        "enabled",
+        "aliases_file"
+    },
+    "turn":{
+        "merge_gap_seconds",
+        "message_break_token",
+        "self_speaker",
+        "other_speaker"
     }
 }
 
@@ -43,3 +69,15 @@ def validate_config(config: dict[str, Any]) -> None:
     score = float(sticker["min_quality_score"])
     if not 0 <= score <= 1:
         raise ValueError("min_quality_score必须位于0到1之间")
+    
+    turn = config["turn"]
+
+    if int(turn["merge_gap_seconds"]) < 0:
+        raise ValueError(
+            "turn.merge_gap_seconds不能小于0"
+        )
+
+    if not str(turn["message_break_token"]).strip():
+        raise ValueError(
+            "turn.message_break_token不能为空"
+        )

@@ -32,7 +32,7 @@ logs/
 data/raw/
 data/interim/
 data/stickers/
-
+data/
 
 # Model and training artifacts
 models/
