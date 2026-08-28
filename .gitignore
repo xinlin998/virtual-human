@@ -31,10 +31,8 @@ logs/
 # Private chat data and generated outputs
 data/raw/
 data/interim/
-data/processed/
 data/stickers/
-data/outputs/
-data/
+
 
 # Model and training artifacts
 models/

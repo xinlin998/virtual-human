@@ -43,7 +43,7 @@ def normalize_message(
     if sticker_caption_col not in result.columns:
         result[sticker_caption_col] = None
     normalized_values = result.apply(
-        lambda row: _build_normalized_content(
+        lambda row:_build_normalized_content(
             message_type=row[message_type_col],
             raw_content=row[content_col],
             sticker_caption=row[sticker_caption_col]

@@ -7,13 +7,23 @@ class StickerMetadata:
     sticker_id: str
     file_path: str
     phash: str
-    visual_description: str
+    visual_description: str = ""
+    aliases: list[str] = field(default_factory=list)
     emotion: list[str] = field(default_factory=list)
     intent: list[str] = field(default_factory=list)
     tone: str = ""
     caption: str = ""
     resolved: bool = False
     usage_count: int = 0
+    quality_score: float = 0.0
+    analysis_attempts: int = 0
+    analysis_mode: str = ""
+    analysis_frame_count: int = 1
+    media_type: str = ""
+    analysis_error: str = ""
+    validation_errors: list[str] = field(default_factory=list)
+    needs_review: bool = True
+    review_priority: float = 0.0
 
 
 @dataclass
