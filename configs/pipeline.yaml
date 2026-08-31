@@ -12,6 +12,9 @@ data:
   sticker_image_dir: "data/stickers"
   model_cache_dir: "models"
 
+  sessions_jsonl: "data/outputs/sessions.jsonl"
+  turns_with_sessions_jsonl: "data/outputs/turns_with_sessions.jsonl"
+
 preprocess:
   allowed_message_types:
     - "text"
@@ -38,3 +41,8 @@ turn:
   message_break_token: "<msg_break>"
   self_speaker: "assistant"
   other_speaker: "user"
+
+session:
+  hard_gap_seconds: 1800
+  max_session_duration_seconds: 7200
+  max_session_turns: 80

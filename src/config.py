@@ -11,14 +11,14 @@ REQUIRED_CONFIG_KEYS = {
         "anonymized_messages_csv",
         "privacy_report_json",
         "turns_jsonl",
+        "turns_with_sessions_jsonl",
+        "sessions_jsonl",
         "sticker_metadata_jsonl",
         "sticker_review_jsonl",
         "sticker_image_dir",
         "model_cache_dir"
     },
-    "preprocess":{
-        "allowed_message_types"
-    },
+    "preprocess":{"allowed_message_types"},
     "sticker":{
         "model_name",
         "batch_size",
@@ -38,9 +38,11 @@ REQUIRED_CONFIG_KEYS = {
         "message_break_token",
         "self_speaker",
         "other_speaker"
+    },
+    "session":{
+        "hard_gap_seconds"
     }
 }
-
 
 def load_config(path: str | Path) -> dict[str, Any]:
     config_path = Path(path)
@@ -81,3 +83,8 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError(
             "turn.message_break_token不能为空"
         )
+
+    session = config["session"]
+
+    if int(session["hard_gap_seconds"]) <= 0:
+        raise ValueError("session.hard_gap_seconds必须大于0")

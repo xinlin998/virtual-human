@@ -69,3 +69,34 @@ def extract_json_object(raw_text: str) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise ValueError("模型输出必须是 JSON 对象")
     return result
+
+def load_jsonl(path: str | Path) -> list[dict[str,Any]]:
+    input_path = Path(path)
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"JSONL文件不存在：{input_path}")
+
+    records: list[dict[str,Any]] = []
+
+    with input_path.open("r",encoding="utf-8") as file:
+        for line_number,line in enumerate(file,start=1):
+            text = line.strip()
+
+            if not text:
+                continue
+
+            try:
+                record = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"{input_path} 第{line_number}行不是合法JSON"
+                ) from exc
+
+            if not isinstance(record,dict):
+                raise ValueError(
+                    f"{input_path} 第{line_number}行必须是JSON对象"
+                )
+
+            records.append(record)
+
+    return records
